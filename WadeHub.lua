@@ -634,7 +634,20 @@ function WadeHub:CreateWindow(config)
 
     local function saveConfig(name)
         if not cfg.Enabled or not writefile then return false end
-        local n = sanitizeProfileName(name or currentConfigName)
+        local n
+        if name then
+            n = sanitizeProfileName(name)
+        else
+            local autoName = currentConfigName
+            if isfile and isfile(autoloadPath()) then
+                local ok, raw = pcall(function() return readfile(autoloadPath()) end)
+                if ok and raw and raw ~= "" then
+                    local cleaned = sanitizeProfileName(raw)
+                    if cleaned then autoName = cleaned end
+                end
+            end
+            n = sanitizeProfileName(autoName)
+        end
         if not n then return false end
         local data = {}
         for flag, item in pairs(configRegistry) do
