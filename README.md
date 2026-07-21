@@ -1,6 +1,6 @@
 # Wade Hub v2.0 — UI Library
 
-Mac OS styled Roblox UI library with smooth animations, Lucide icons via Rayfield, sidebar avatar footer, and a simple API.
+Mac OS styled Roblox UI library with smooth animations, Lucide icons via Rayfield, auto-save config system, sidebar avatar footer, and a simple API.
 
 ## Getting Started
 
@@ -142,7 +142,27 @@ right:CreateButton({Name = "Load"})
 right:CreateToggle({Name = "Option B"})
 ```
 
-## Dialog / Popup
+## Configuration
+```lua
+local Window = WadeHub:CreateWindow({
+    Name = "My Hub",
+    Configuration = {
+        AutoLoad = true,
+        FolderName = "MyGame",
+    },
+})
+
+-- Add Flag to elements you want to persist
+Tab:CreateToggle({Name = "Aimbot", Flag = "aimbot"})
+
+-- Multi-profile
+Window:SaveConfig("Profile1")
+Window:LoadConfig("Profile2")
+Window:DeleteConfig("Old")
+Window:GetConfigList()            -- {"default", "Profile1", "Profile2"}
+```
+
+## Dialog
 ```lua
 -- Confirm
 Window:Dialog({

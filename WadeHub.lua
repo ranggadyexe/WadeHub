@@ -596,7 +596,120 @@ function WadeHub:CreateWindow(config)
 
     local WindowElements = {}
     local currentActiveTab = nil
-    local configRegistry = {} -- {name = {type, getValue, setValue}}
+    local configRegistry = {}
+    local _isLoading = false
+
+    local cfg = config.Configuration or {}
+    cfg.Enabled = cfg.Enabled ~= false
+    cfg.AutoSave = cfg.AutoSave or false
+    cfg.AutoLoad = cfg.AutoLoad or false
+    cfg.FolderName = cfg.FolderName or "WadeHub"
+
+    local HttpService = game:GetService("HttpService")
+    local currentConfigName = "default"
+
+    local function initFolder()
+        if makefolder and not isfolder(cfg.FolderName) then
+            makefolder(cfg.FolderName)
+        end
+    end
+
+    local function cfgPath(name)
+        return cfg.FolderName .. "/" .. (name or currentConfigName) .. ".json"
+    end
+
+    local function autoloadPath()
+        return cfg.FolderName .. "/_autoload.txt"
+    end
+
+    local function saveConfig(name)
+        if not cfg.Enabled or not writefile then return end
+        local n = name or currentConfigName
+        local data = {}
+        for flag, item in pairs(configRegistry) do
+            if item.GetValue and flag ~= "cfg_select" then
+                data[flag] = item.GetValue()
+            end
+        end
+        data["cfg_select"] = n
+        initFolder()
+        writefile(cfgPath(n), HttpService:JSONEncode(data))
+        writefile(autoloadPath(), n)
+    end
+
+    local function loadConfig(name)
+        if not cfg.Enabled or not readfile or not isfile then return end
+        local n = name or currentConfigName
+        local path = cfgPath(n)
+        if not isfile(path) then return end
+        local ok, raw = pcall(function() return readfile(path) end)
+        if not ok then return end
+        local ok2, parsed = pcall(function() return HttpService:JSONDecode(raw) end)
+        if not ok2 then return end
+        _isLoading = true
+        for flag, val in pairs(parsed) do
+            if configRegistry[flag] and configRegistry[flag].SetValue then
+                configRegistry[flag].SetValue(val)
+            end
+        end
+        if configRegistry["cfg_select"] then
+            configRegistry["cfg_select"].SetValue(n)
+        end
+        _isLoading = false
+        currentConfigName = n
+    end
+
+    local function deleteConfig(name)
+        if not cfg.Enabled or not delfile then return end
+        local n = name or currentConfigName
+        local path = cfgPath(n)
+        if isfile and isfile(path) then delfile(path) end
+        if currentConfigName == n then
+            currentConfigName = "default"
+        end
+    end
+
+    local function getConfigList()
+        local list = {}
+        if not cfg.Enabled or not listfiles or not isfolder then
+            table.insert(list, "default")
+            return list
+        end
+        initFolder()
+        if isfolder(cfg.FolderName) then
+            for _, file in ipairs(listfiles(cfg.FolderName)) do
+                local name = file:match("([^/\\]+)%.json$")
+                if name and name ~= "_autoload" then
+                    table.insert(list, name)
+                end
+            end
+        end
+        if #list == 0 then table.insert(list, "default") end
+        return list
+    end
+
+    function WindowElements:SaveConfig(name)
+        saveConfig(name)
+        self:Notify({Title = "Config", Content = "Saved: " .. (name or currentConfigName), Duration = 2})
+    end
+
+    function WindowElements:LoadConfig(name)
+        loadConfig(name)
+        self:Notify({Title = "Config", Content = "Loaded: " .. (name or currentConfigName), Duration = 2})
+    end
+
+    function WindowElements:DeleteConfig(name)
+        deleteConfig(name)
+        self:Notify({Title = "Config", Content = "Deleted: " .. (name or currentConfigName), Duration = 2})
+    end
+
+    function WindowElements:GetConfigList()
+        return getConfigList()
+    end
+
+    function WindowElements:GetCurrentConfig()
+        return currentConfigName
+    end
 
     function WindowElements:Dialog(options)
         createDialog(options)
@@ -1021,15 +1134,30 @@ function WadeHub:CreateWindow(config)
             InputBox.TextSize = 12
             InputBox.TextXAlignment = Enum.TextXAlignment.Left
             InputBox.ClearTextOnFocus = clearOnFocus
+            InputBox.TextTruncate = Enum.TextTruncate.AtEnd
 
             InputBox.Focused:Connect(function()
                 TweenService:Create(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(10, 132, 255)}):Play()
             end)
 
+            local currentText = ""
             InputBox.FocusLost:Connect(function()
                 TweenService:Create(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(70, 70, 75)}):Play()
-                callback(InputBox.Text)
+                currentText = InputBox.Text
+                callback(currentText)
+                if not _isLoading and cfg.AutoSave then saveConfig() end
             end)
+
+            if config.Flag then
+                configRegistry[config.Flag] = {
+                    Type = "TextBox",
+                    GetValue = function() return currentText end,
+                    SetValue = function(val)
+                        currentText = tostring(val or "")
+                        InputBox.Text = currentText
+                    end,
+                }
+            end
         end
 
         function TabElements:CreateKeybind(config)
@@ -1097,6 +1225,7 @@ function WadeHub:CreateWindow(config)
                         BindButton.Text = currentKey.Name
                         isBinding = false
                         TweenService:Create(UIStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(70, 70, 75)}):Play()
+                        if not _isLoading and cfg.AutoSave then saveConfig() end
                     end
                 elseif not gameProcessed then
                     if input.KeyCode == currentKey then
@@ -1108,6 +1237,20 @@ function WadeHub:CreateWindow(config)
                 end
             end)
             table.insert(allConnections, inputConn)
+
+            if config.Flag then
+                configRegistry[config.Flag] = {
+                    Type = "Keybind",
+                    GetValue = function() return currentKey.Name end,
+                    SetValue = function(val)
+                        local kc = Enum.KeyCode[val]
+                        if kc then
+                            currentKey = kc
+                            BindButton.Text = kc.Name
+                        end
+                    end,
+                }
+            end
         end
 
                 function TabElements:CreateToggle(config)
@@ -1910,7 +2053,7 @@ function WadeHub:CreateWindow(config)
             local default = config.Color or Color3.fromRGB(255, 255, 255)
             local callback = config.Callback or function() end
 
-            -- Set initial color ke HSV
+            -- Set initial color
             local h, s, v = default:ToHSV()
 
             local CPFrame = Instance.new("Frame")
@@ -2162,6 +2305,20 @@ function WadeHub:CreateWindow(config)
         end
 
         return TabElements
+    end
+
+    if cfg.AutoLoad then
+        task.spawn(function()
+            task.wait(0.5)
+            local name = "default"
+            if isfile and isfile(autoloadPath()) then
+                pcall(function()
+                    local n = readfile(autoloadPath())
+                    if n and n ~= "" then name = n end
+                end)
+            end
+            loadConfig(name)
+        end)
     end
 
     return WindowElements
