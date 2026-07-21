@@ -375,9 +375,8 @@ function WadeHub:CreateWindow(config)
         TitleLbl.TextXAlignment = Enum.TextXAlignment.Center
         TitleLbl.ZIndex = 102
 
-        local ContentLbl
         if dContent ~= "" then
-            ContentLbl = Instance.new("TextLabel")
+            local ContentLbl = Instance.new("TextLabel")
             ContentLbl.Parent = Card
             ContentLbl.BackgroundTransparency = 1
             ContentLbl.Position = UDim2.new(0, 20, 0, yOffset + 22)
@@ -630,6 +629,17 @@ function WadeHub:CreateWindow(config)
         return cfg.FolderName .. "/_autoload.txt"
     end
 
+    local function getAutoLoadTarget()
+        if isfile and isfile(autoloadPath()) then
+            local ok, raw = pcall(function() return readfile(autoloadPath()) end)
+            if ok and raw and raw ~= "" then
+                local cleaned = sanitizeProfileName(raw)
+                if cleaned then return cleaned end
+            end
+        end
+        return nil
+    end
+
     local _saveGeneration = 0
 
     local function saveConfig(name)
@@ -638,15 +648,7 @@ function WadeHub:CreateWindow(config)
         if name then
             n = sanitizeProfileName(name)
         else
-            local autoName = currentConfigName
-            if isfile and isfile(autoloadPath()) then
-                local ok, raw = pcall(function() return readfile(autoloadPath()) end)
-                if ok and raw and raw ~= "" then
-                    local cleaned = sanitizeProfileName(raw)
-                    if cleaned then autoName = cleaned end
-                end
-            end
-            n = sanitizeProfileName(autoName)
+            n = sanitizeProfileName(getAutoLoadTarget() or currentConfigName)
         end
         if not n then return false end
         local data = {}
@@ -850,16 +852,7 @@ function WadeHub:CreateWindow(config)
     end
 
     function WindowElements:AutoLoadConfig()
-        local name = "default"
-        if isfile and isfile(autoloadPath()) then
-            pcall(function()
-                local n = readfile(autoloadPath())
-                if n and n ~= "" then
-                    local cleaned = sanitizeProfileName(n)
-                    if cleaned then name = cleaned end
-                end
-            end)
-        end
+        local name = getAutoLoadTarget() or "default"
         loadConfig(name)
     end
 
@@ -1083,12 +1076,10 @@ function WadeHub:CreateWindow(config)
             local Arrow = CreateIcon(SectionBtn, "chevron-down", UDim2.new(0, 14, 0, 14), UDim2.new(0, 0, 0.5, -7))
 
             -- Switch icon on collapse/expand
-            local sectionIcon = "chevron-down"
             local isOpen = defaultOpen
             if not isOpen then
                 if Arrow then Arrow:Destroy() end
                 Arrow = CreateIcon(SectionBtn, "chevron-right", UDim2.new(0, 14, 0, 14), UDim2.new(0, 0, 0.5, -7))
-                sectionIcon = "chevron-right"
             end
 
             local Line = Instance.new("Frame")
@@ -1463,10 +1454,9 @@ function WadeHub:CreateWindow(config)
             ClickButton.Text = ""
 
             local state = default
-            local pulseLoop = nil
 
             local function startPulse()
-                pulseLoop = task.spawn(function()
+                task.spawn(function()
                     while state do
                         TweenService:Create(GlowRing, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {BackgroundTransparency = 0.85}):Play()
                         task.wait(1)
@@ -2486,16 +2476,7 @@ function WadeHub:CreateWindow(config)
             if cfg.AutoLoadDelay and cfg.AutoLoadDelay > 0 then
                 task.wait(cfg.AutoLoadDelay)
             end
-            local name = "default"
-            if isfile and isfile(autoloadPath()) then
-                pcall(function()
-                    local n = readfile(autoloadPath())
-                    if n and n ~= "" then
-                        local cleaned = sanitizeProfileName(n)
-                        if cleaned then name = cleaned end
-                    end
-                end)
-            end
+            local name = getAutoLoadTarget() or "default"
             loadConfig(name)
         end)
     end
