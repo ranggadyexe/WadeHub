@@ -149,11 +149,11 @@ right:CreateToggle({Name = "Option B"})
 local Window = WadeHub:CreateWindow({
     Name = "My Hub",
     Configuration = {
-        AutoLoad = true,         -- auto-load last-used config on startup
-        AutoSave = true,         -- auto-save on any element change (debounced 0.3s)
-        AutoLoadDelay = 0.5,     -- optional, delay before auto-load (default 0.5)
-        FolderName = "MyGame",   -- folder name for config files
-        OnConfigLoaded = function(name)
+        AutoLoad = true,          -- auto-load last-used config on startup
+        AutoSave = true,          -- auto-save on any flagged element change (debounced 0.3s)
+        AutoLoadDelay = 0.5,      -- optional, seconds before auto-load (default 0.5)
+        FolderName = "MyGame",    -- folder name for config files (default "WadeHub")
+        OnConfigLoaded = function(name)  -- optional, called after config restore
             print("Config loaded: " .. name)
         end,
     },
@@ -161,20 +161,22 @@ local Window = WadeHub:CreateWindow({
 ```
 
 ### Flag System
-Only elements with `Flag` are saved to config files. Add `Flag = "unique_name"` to any element you want to persist:
+Only elements with `Flag = "unique_name"` are saved/loaded. Every flagged element must have a unique name — duplicates will overwrite each other.
 
 ```lua
-Tab:CreateToggle({  Name = "Aimbot",   Flag = "aimbot",   CurrentValue = false })
-Tab:CreateSlider({  Name = "Speed",    Flag = "speed",    Min = 16, Max = 100, Default = 50 })
-Tab:CreateDropdown({Name = "Weapon",   Flag = "weapon",   Options = {"Sword", "Bow"}, Default = "Sword"})
-Tab:CreateMultiDropdown({Name = "Skills", Flag = "skills", Options = {"A","B","C"}, CurrentSelected = {"A"}})
-Tab:CreateTextBox({ Name = "Username", Flag = "username", Placeholder = "..." })
-Tab:CreateKeybind({ Name = "UI Key",   Flag = "ui_key",   CurrentKey = Enum.KeyCode.RightShift })
+Tab:CreateToggle({         Name = "Aimbot",   Flag = "aimbot",   CurrentValue = false })
+Tab:CreateSlider({         Name = "Speed",    Flag = "speed",    Min = 16, Max = 100, Default = 50 })
+Tab:CreateDropdown({       Name = "Weapon",   Flag = "weapon",   Options = {"Sword", "Bow"}, Default = "Sword"})
+Tab:CreateMultiDropdown({  Name = "Skills",   Flag = "skills",   Options = {"A","B","C"}, CurrentSelected = {"A"}})
+Tab:CreateTextBox({        Name = "Username", Flag = "username", Placeholder = "..." })
+Tab:CreateKeybind({        Name = "UI Key",   Flag = "ui_key",   CurrentKey = Enum.KeyCode.RightShift })
 ```
 
-| Element | Flag | Value Type | Example |
+> **Important**: Callbacks do NOT fire when config is loaded — only UI state changes. Your game logic won't trigger automatically on restart.
+
+| Element | Flag Support | Saved As | Example |
 |---|---|---|---|
-| `CreateToggle` | ✅ | Boolean | `"aimbot"` → `true/false` |
+| `CreateToggle` | ✅ | Boolean | `"aimbot"` → `true` |
 | `CreateSlider` | ✅ | Number | `"speed"` → `50` |
 | `CreateDropdown` | ✅ | String | `"weapon"` → `"Sword"` |
 | `CreateMultiDropdown` | ✅ | Array | `"skills"` → `{"A","B"}` |
@@ -184,40 +186,65 @@ Tab:CreateKeybind({ Name = "UI Key",   Flag = "ui_key",   CurrentKey = Enum.KeyC
 | `CreateButton` | ❌ | — | No value to save |
 | `CreateLabel` | ❌ | — | No value to save |
 
-### Multi-Profile
+### Multi-Profile API
+All config functions return `true`/`false` and show a notification on result.
+
 ```lua
--- All functions return true/false for success/failure
--- Save current flags to a profile
-Window:SaveConfig("Profile1")   -- MyGame/Profile1.json
+-- Save current flagged values to a profile (also updates auto-load target)
+Window:SaveConfig("Profile1")     -- MyGame/Profile1.json
 
--- Load flags from a profile
-Window:LoadConfig("Profile2")   -- MyGame/Profile2.json
+-- Load flagged values from a profile (UI updates, callbacks NOT fired)
+Window:LoadConfig("Profile2")     -- MyGame/Profile2.json
 
--- Delete a profile
+-- Delete a profile file
 Window:DeleteConfig("Old")
 
--- Get list of all saved profiles
-local profiles = Window:GetConfigList()  -- {"default", "Profile1", "Profile2"}
+-- Set which config loads on next script restart (without saving)
+Window:SetAutoLoad("Warrior")     -- writes only _autoload.txt
+
+-- Manually trigger auto-load (reads _autoload.txt, loads that config)
+Window:AutoLoadConfig()
+
+-- Get current active config name
+local name = Window:GetCurrentConfig()  -- "Profile1"
+
+-- Get list of all saved profiles (excludes _tmp and _autoload)
+local profiles = Window:GetConfigList() -- {"default", "Profile1", "Profile2"}
 ```
 
-### Auto-Load
-`AutoLoad = true` reads `_autoload.txt` on startup. Two ways to control it:
+### How AutoLoad + AutoSave Work (Default Behavior)
 
-1. **SaveConfig(name)** — automatically updates `_autoload.txt` to that name. The last-saved config becomes the startup target.
-2. **SetAutoLoad(name)** — sets the auto-load target WITHOUT saving current settings. Use this to pick which config loads next time without overwriting anything.
+When `AutoLoad = true` and `AutoSave = true`:
 
-```lua
-Window:SetAutoLoad("Warrior")   -- next restart loads Warrior.json
+```
+FIRST RUN (no files exist):
+  User changes any flagged element
+    → RequestSave() debounced 0.3s
+    → saveConfig() → creates default.json + _autoload.txt = "default"
+  
+RESTART:
+  Heartbeat:Wait() — ensures all flags are registered
+  → task.wait(AutoLoadDelay)
+  → getAutoLoadTarget() reads _autoload.txt → "default"
+  → loadConfig("default") → restores default.json → OnConfigLoaded("default")
+
+SAVE EXPLICITLY:
+  Window:SaveConfig("Warrior") → creates Warrior.json + _autoload.txt = "Warrior"
+  Next restart loads Warrior.json automatically
+
+SET AUTO-LOAD WITHOUT SAVING:
+  Window:SetAutoLoad("Mage") → writes _autoload.txt = "Mage"
+  Next restart tries to load Mage.json (silent fail if it doesn't exist)
 ```
 
-### How It Works
-1. **Flag** registers the element in `configRegistry` with Type + Default metadata
-2. **SaveConfig** collects all `GetValue()` from registered flags → JSONEncode → atomic writefile (movefile or tmp→actual)
-3. **LoadConfig** reads file → JSONDecode → validates types → tries tmp fallback if corrupt → calls `SetValue()` on each flag (without firing callbacks) → restores UI state
-4. **RequestSave** debounces 0.3s — prevents spam on fast interactions (e.g. slider drag)
-5. **SetAutoLoad** writes only `_autoload.txt` — decouples save from auto-load target
-6. **sanitizeProfileName** strips illegal characters, rejects empty names
-7. **_autoload.txt** stores the name of the last-used config for auto-load on startup
+### Safety Features
+- **No side effects on load**: All `SetValue()` calls skip user callbacks via `_isLoading` guard
+- **Type validation**: Wrong types in JSON → fall back to element default + `warn()`
+- **Missing flag fallback**: New flags not in file → restored to their default values
+- **Atomic writes**: Uses `movefile` if available, or writes to `_tmp` first then copies
+- **Tmp recovery**: If main file is corrupt, `loadConfig()` tries `_tmp` backup
+- **Name sanitization**: Only `[a-zA-Z0-9_-]` allowed in profile names
+- **Generation debounce**: Rapid slider drags only save once (last value wins)
 
 ## Dialog
 ```lua
