@@ -603,10 +603,18 @@ function WadeHub:CreateWindow(config)
     cfg.Enabled = cfg.Enabled ~= false
     cfg.AutoSave = cfg.AutoSave or false
     cfg.AutoLoad = cfg.AutoLoad or false
+    cfg.AutoLoadDelay = cfg.AutoLoadDelay or 0.5
     cfg.FolderName = cfg.FolderName or "WadeHub"
+    cfg.OnConfigLoaded = cfg.OnConfigLoaded or nil
 
     local HttpService = game:GetService("HttpService")
     local currentConfigName = "default"
+
+    local function sanitizeProfileName(name)
+        local cleaned = string.gsub(tostring(name or ""), "[^%w_%-]", "")
+        if cleaned == "" then return nil end
+        return cleaned
+    end
 
     local function initFolder()
         if makefolder and not isfolder(cfg.FolderName) then
@@ -622,9 +630,23 @@ function WadeHub:CreateWindow(config)
         return cfg.FolderName .. "/_autoload.txt"
     end
 
+    local _saveTimer = nil
+
+    local function RequestSave()
+        if _isLoading or not cfg.AutoSave then return end
+        if _saveTimer then
+            pcall(function() task.cancel(_saveTimer) end)
+        end
+        _saveTimer = task.delay(0.3, function()
+            _saveTimer = nil
+            saveConfig()
+        end)
+    end
+
     local function saveConfig(name)
-        if not cfg.Enabled or not writefile then return end
-        local n = name or currentConfigName
+        if not cfg.Enabled or not writefile then return false end
+        local n = sanitizeProfileName(name or currentConfigName)
+        if not n then return false end
         local data = {}
         for flag, item in pairs(configRegistry) do
             if item.GetValue and flag ~= "cfg_select" then
@@ -633,23 +655,58 @@ function WadeHub:CreateWindow(config)
         end
         data["cfg_select"] = n
         initFolder()
-        writefile(cfgPath(n), HttpService:JSONEncode(data))
-        writefile(autoloadPath(), n)
+        local json = HttpService:JSONEncode(data)
+        local tmpPath = cfgPath(n .. "_tmp")
+        local ok, err = pcall(function() writefile(tmpPath, json) end)
+        if not ok then
+            pcall(function() if delfile then delfile(tmpPath) end end)
+            return false
+        end
+        ok, err = pcall(function() writefile(cfgPath(n), json) end)
+        if not ok then
+            pcall(function() if delfile then delfile(tmpPath) end end)
+            return false
+        end
+        pcall(function() if delfile then delfile(tmpPath) end end)
+        pcall(function() writefile(autoloadPath(), n) end)
+        return true
     end
 
     local function loadConfig(name)
-        if not cfg.Enabled or not readfile or not isfile then return end
-        local n = name or currentConfigName
+        if not cfg.Enabled or not readfile or not isfile then return false end
+        local n = sanitizeProfileName(name or currentConfigName)
+        if not n then return false end
         local path = cfgPath(n)
-        if not isfile(path) then return end
+        if not isfile(path) then return false end
         local ok, raw = pcall(function() return readfile(path) end)
-        if not ok then return end
+        if not ok then
+            warn("WadeHub: Failed to read config file: " .. path)
+            return false
+        end
         local ok2, parsed = pcall(function() return HttpService:JSONDecode(raw) end)
-        if not ok2 then return end
+        if not ok2 then
+            warn("WadeHub: Failed to parse config file: " .. path)
+            return false
+        end
         _isLoading = true
         for flag, val in pairs(parsed) do
-            if configRegistry[flag] and configRegistry[flag].SetValue then
-                configRegistry[flag].SetValue(val)
+            local item = configRegistry[flag]
+            if item and item.SetValue then
+                local valType = type(val)
+                local expectedType = item.Type
+                if valType == expectedType then
+                    item.SetValue(val)
+                else
+                    warn("WadeHub: Type mismatch for flag '" .. flag .. "' — expected " .. tostring(expectedType) .. ", got " .. valType .. ". Skipping.")
+                    if item.Default ~= nil then
+                        item.SetValue(item.Default)
+                    end
+                end
+            end
+        end
+        for flag, item in pairs(configRegistry) do
+            if flag ~= "cfg_select" and parsed[flag] == nil and item.Default ~= nil then
+                item.SetValue(item.Default)
             end
         end
         if configRegistry["cfg_select"] then
@@ -657,16 +714,22 @@ function WadeHub:CreateWindow(config)
         end
         _isLoading = false
         currentConfigName = n
+        if type(cfg.OnConfigLoaded) == "function" then
+            task.defer(function() pcall(cfg.OnConfigLoaded, n) end)
+        end
+        return true
     end
 
     local function deleteConfig(name)
-        if not cfg.Enabled or not delfile then return end
-        local n = name or currentConfigName
+        if not cfg.Enabled or not delfile then return false end
+        local n = sanitizeProfileName(name or currentConfigName)
+        if not n then return false end
         local path = cfgPath(n)
         if isfile and isfile(path) then delfile(path) end
         if currentConfigName == n then
             currentConfigName = "default"
         end
+        return true
     end
 
     local function getConfigList()
@@ -679,7 +742,7 @@ function WadeHub:CreateWindow(config)
         if isfolder(cfg.FolderName) then
             for _, file in ipairs(listfiles(cfg.FolderName)) do
                 local name = file:match("([^/\\]+)%.json$")
-                if name and name ~= "_autoload" then
+                if name and name ~= "_autoload" and not string.find(name, "_tmp$") then
                     table.insert(list, name)
                 end
             end
@@ -688,19 +751,41 @@ function WadeHub:CreateWindow(config)
         return list
     end
 
+    local function RegisterFlag(flag, item)
+        configRegistry[flag] = item
+    end
+
     function WindowElements:SaveConfig(name)
-        saveConfig(name)
-        self:Notify({Title = "Config", Content = "Saved: " .. (name or currentConfigName), Duration = 2})
+        local displayName = name or currentConfigName
+        local success = saveConfig(name)
+        if success then
+            self:Notify({Title = "Config", Content = "Saved: " .. displayName, Duration = 2})
+        else
+            self:Notify({Title = "Config Error", Content = "Failed to save: " .. displayName, Duration = 3})
+        end
+        return success
     end
 
     function WindowElements:LoadConfig(name)
-        loadConfig(name)
-        self:Notify({Title = "Config", Content = "Loaded: " .. (name or currentConfigName), Duration = 2})
+        local displayName = name or currentConfigName
+        local success = loadConfig(name)
+        if success then
+            self:Notify({Title = "Config", Content = "Loaded: " .. displayName, Duration = 2})
+        else
+            self:Notify({Title = "Config Error", Content = "Failed to load: " .. displayName, Duration = 3})
+        end
+        return success
     end
 
     function WindowElements:DeleteConfig(name)
-        deleteConfig(name)
-        self:Notify({Title = "Config", Content = "Deleted: " .. (name or currentConfigName), Duration = 2})
+        local displayName = name or currentConfigName
+        local success = deleteConfig(name)
+        if success then
+            self:Notify({Title = "Config", Content = "Deleted: " .. displayName, Duration = 2})
+        else
+            self:Notify({Title = "Config Error", Content = "Failed to delete: " .. displayName, Duration = 3})
+        end
+        return success
     end
 
     function WindowElements:GetConfigList()
@@ -1145,18 +1230,19 @@ function WadeHub:CreateWindow(config)
                 TweenService:Create(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(70, 70, 75)}):Play()
                 currentText = InputBox.Text
                 callback(currentText)
-                if not _isLoading and cfg.AutoSave then saveConfig() end
+                RequestSave()
             end)
 
             if config.Flag then
-                configRegistry[config.Flag] = {
-                    Type = "TextBox",
+                RegisterFlag(config.Flag, {
+                    Type = "string",
+                    Default = "",
                     GetValue = function() return currentText end,
                     SetValue = function(val)
                         currentText = tostring(val or "")
                         InputBox.Text = currentText
                     end,
-                }
+                })
             end
         end
 
@@ -1225,7 +1311,7 @@ function WadeHub:CreateWindow(config)
                         BindButton.Text = currentKey.Name
                         isBinding = false
                         TweenService:Create(UIStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(70, 70, 75)}):Play()
-                        if not _isLoading and cfg.AutoSave then saveConfig() end
+                        RequestSave()
                     end
                 elseif not gameProcessed then
                     if input.KeyCode == currentKey then
@@ -1239,8 +1325,9 @@ function WadeHub:CreateWindow(config)
             table.insert(allConnections, inputConn)
 
             if config.Flag then
-                configRegistry[config.Flag] = {
-                    Type = "Keybind",
+                RegisterFlag(config.Flag, {
+                    Type = "string",
+                    Default = currentKey.Name,
                     GetValue = function() return currentKey.Name end,
                     SetValue = function(val)
                         local kc = Enum.KeyCode[val]
@@ -1249,7 +1336,7 @@ function WadeHub:CreateWindow(config)
                             BindButton.Text = kc.Name
                         end
                     end,
-                }
+                })
             end
         end
 
@@ -1336,21 +1423,25 @@ function WadeHub:CreateWindow(config)
                     TweenService:Create(GlowRing, TweenInfo.new(0.3, Enum.EasingStyle.Quint), {BackgroundTransparency = 1, Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(1, -30, 0.5, -8)}):Play()
                     TweenService:Create(Title, TweenInfo.new(0.3), {TextColor3 = Color3.fromRGB(150, 150, 155)}):Play()
                 end
-                callback(state)
+                if not _isLoading then
+                    callback(state)
+                end
             end
 
             if default then startPulse() end
 
             ClickButton.MouseButton1Click:Connect(function()
                 SetState(not state)
+                RequestSave()
             end)
 
             if config.Flag then
-                configRegistry[config.Flag] = {
-                    Type = "Toggle",
+                RegisterFlag(config.Flag, {
+                    Type = "boolean",
+                    Default = default,
                     GetValue = function() return state end,
                     SetValue = function(val) SetState(val) end
-                }
+                })
             end
         end
         function TabElements:CreateSlider(config)
@@ -1533,7 +1624,9 @@ function WadeHub:CreateWindow(config)
                 ValueText.Text = tostring(currentValue)
                 TweenService:Create(SliderFill, TweenInfo.new(0.2), {Size = UDim2.new(p, 0, 1, 0)}):Play()
                 updateKnobPosition(p)
-                callback(currentValue)
+                if not _isLoading then
+                    callback(currentValue)
+                end
             end
 
             local function updateSlider(input)
@@ -1545,6 +1638,7 @@ function WadeHub:CreateWindow(config)
                 TweenService:Create(SliderFill, TweenInfo.new(0.1), {Size = UDim2.new(p, 0, 1, 0)}):Play()
                 updateKnobPosition(p)
                 callback(value)
+                RequestSave()
             end
 
             updateKnobPosition(percent)
@@ -1556,17 +1650,19 @@ function WadeHub:CreateWindow(config)
                 end
             end)
 
-            UserInputService.InputEnded:Connect(function(input)
+            local endConn = UserInputService.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                     dragging = false
                 end
             end)
+            table.insert(allConnections, endConn)
 
-            UserInputService.InputChanged:Connect(function(input)
+            local changeConn = UserInputService.InputChanged:Connect(function(input)
                 if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                     updateSlider(input)
                 end
             end)
+            table.insert(allConnections, changeConn)
 
             ValueClickBtn.MouseButton1Click:Connect(function()
                 ValueText.Visible = false
@@ -1588,11 +1684,12 @@ function WadeHub:CreateWindow(config)
             end)
 
             if config.Flag then
-                configRegistry[config.Flag] = {
-                    Type = "Slider",
+                RegisterFlag(config.Flag, {
+                    Type = "number",
+                    Default = snap(default),
                     GetValue = function() return currentValue end,
                     SetValue = function(val) SetValue(val) end
-                }
+                })
             end
         end
         function TabElements:CreateDropdown(config)
@@ -1732,6 +1829,7 @@ function WadeHub:CreateWindow(config)
                         SelectedText.Text = opt
                         SelectedText.TextColor3 = Color3.fromRGB(10, 132, 255)
                         callback(opt)
+                        RequestSave()
                         isOpen = false
                         TweenService:Create(DropdownFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 40)}):Play()
                         if Arrow then Arrow:Destroy() end
@@ -1794,8 +1892,9 @@ function WadeHub:CreateWindow(config)
             end
 
             if config.Flag then
-                configRegistry[config.Flag] = {
-                    Type = "Dropdown",
+                RegisterFlag(config.Flag, {
+                    Type = "string",
+                    Default = default,
                     GetValue = function() return currentSelected end,
                     SetValue = function(val)
                         currentSelected = val
@@ -1803,7 +1902,7 @@ function WadeHub:CreateWindow(config)
                         SelectedText.TextColor3 = val and Color3.fromRGB(10, 132, 255) or Color3.fromRGB(150, 150, 155)
                     end,
                     Refresh = RefreshOptions
-                }
+                })
             end
 
             return { Refresh = RefreshOptions }
@@ -1973,6 +2072,7 @@ function WadeHub:CreateWindow(config)
                         end
                         UpdateSelectedText()
                         callback(currentSelected)
+                        RequestSave()
                     end)
 
                     table.insert(optionButtons, {btn = OptBtn, name = opt})
@@ -2031,15 +2131,16 @@ function WadeHub:CreateWindow(config)
             end
 
             if config.Flag then
-                configRegistry[config.Flag] = {
-                    Type = "MultiDropdown",
+                RegisterFlag(config.Flag, {
+                    Type = "table",
+                    Default = config.CurrentSelected or {},
                     GetValue = function() return currentSelected end,
                     SetValue = function(val)
                         currentSelected = val or {}
                         UpdateSelectedText()
                     end,
                     Refresh = RefreshOptions
-                }
+                })
             end
 
             return {
@@ -2223,14 +2324,15 @@ function WadeHub:CreateWindow(config)
             end)
 
             -- Global Drag Ending
-            UserInputService.InputEnded:Connect(function(input)
+            local cpEndConn = UserInputService.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                     svDragging = false
                     hueDragging = false
                 end
             end)
+            table.insert(allConnections, cpEndConn)
 
-            UserInputService.InputChanged:Connect(function(input)
+            local cpChangeConn = UserInputService.InputChanged:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
                     if svDragging then
                         updateSV(input)
@@ -2240,6 +2342,7 @@ function WadeHub:CreateWindow(config)
                     end
                 end
             end)
+            table.insert(allConnections, cpChangeConn)
 
             -- Animasi Open/Close
             local isOpen = false
@@ -2309,12 +2412,15 @@ function WadeHub:CreateWindow(config)
 
     if cfg.AutoLoad then
         task.spawn(function()
-            task.wait(0.5)
+            task.wait(cfg.AutoLoadDelay)
             local name = "default"
             if isfile and isfile(autoloadPath()) then
                 pcall(function()
                     local n = readfile(autoloadPath())
-                    if n and n ~= "" then name = n end
+                    if n and n ~= "" then
+                        local cleaned = sanitizeProfileName(n)
+                        if cleaned then name = cleaned end
+                    end
                 end)
             end
             loadConfig(name)

@@ -149,8 +149,13 @@ right:CreateToggle({Name = "Option B"})
 local Window = WadeHub:CreateWindow({
     Name = "My Hub",
     Configuration = {
-        AutoLoad = true,        -- auto-load last-used config on startup
-        FolderName = "MyGame",  -- folder name for config files
+        AutoLoad = true,         -- auto-load last-used config on startup
+        AutoSave = true,         -- auto-save on any element change (debounced 0.3s)
+        AutoLoadDelay = 0.5,     -- optional, delay before auto-load (default 0.5)
+        FolderName = "MyGame",   -- folder name for config files
+        OnConfigLoaded = function(name)
+            print("Config loaded: " .. name)
+        end,
     },
 })
 ```
@@ -181,6 +186,7 @@ Tab:CreateKeybind({ Name = "UI Key",   Flag = "ui_key",   CurrentKey = Enum.KeyC
 
 ### Multi-Profile
 ```lua
+-- All functions return true/false for success/failure
 -- Save current flags to a profile
 Window:SaveConfig("Profile1")   -- MyGame/Profile1.json
 
@@ -195,19 +201,15 @@ local profiles = Window:GetConfigList()  -- {"default", "Profile1", "Profile2"}
 ```
 
 ### Auto-Load
-Set which config loads on startup:
-```lua
--- Write to _autoload.txt manually (or use the "Set Auto Load" button in your UI)
-writefile("MyGame/_autoload.txt", "Profile1")
-```
-
-On next script execution, `Profile1` loads automatically (0.5s delay after UI init).
+`AutoLoad = true` reads `_autoload.txt` on startup. You don't need to write it manually — `SaveConfig` auto-updates it. On next script execution, the last-saved config loads automatically (with `AutoLoadDelay` seconds delay).
 
 ### How It Works
-1. **Flag** registers the element in `configRegistry`
-2. **SaveConfig** collects all `GetValue()` from registered flags → JSONEncode → writefile
-3. **LoadConfig** reads file → JSONDecode → calls `SetValue()` on each flag → restores UI state
-4. **_autoload.txt** stores the name of the last-used config for auto-load on startup
+1. **Flag** registers the element in `configRegistry` with Type + Default metadata
+2. **SaveConfig** collects all `GetValue()` from registered flags → JSONEncode → atomic writefile (tmp → actual)
+3. **LoadConfig** reads file → JSONDecode → validates types → calls `SetValue()` on each flag (without firing callbacks) → restores UI state
+4. **RequestSave** debounces 0.3s — prevents spam on fast interactions (e.g. slider drag)
+5. **sanitizeProfileName** strips illegal characters, rejects empty names
+6. **_autoload.txt** stores the name of the last-used config for auto-load on startup
 
 ## Dialog
 ```lua
