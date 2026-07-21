@@ -630,7 +630,7 @@ function WadeHub:CreateWindow(config)
         return cfg.FolderName .. "/_autoload.txt"
     end
 
-    local _saveTimer = nil
+    local _saveGeneration = 0
 
     local function saveConfig(name)
         if not cfg.Enabled or not writefile then return false end
@@ -684,11 +684,10 @@ function WadeHub:CreateWindow(config)
 
     local function RequestSave()
         if _isLoading or not cfg.AutoSave then return end
-        if _saveTimer then
-            pcall(function() task.cancel(_saveTimer) end)
-        end
-        _saveTimer = task.delay(0.3, function()
-            _saveTimer = nil
+        _saveGeneration = _saveGeneration + 1
+        local gen = _saveGeneration
+        task.delay(0.3, function()
+            if _saveGeneration ~= gen then return end
             saveConfig()
         end)
     end
@@ -848,6 +847,20 @@ function WadeHub:CreateWindow(config)
         pcall(function() writefile(autoloadPath(), n) end)
         self:Notify({Title = "Auto Load", Content = "Set to: " .. n, Duration = 2})
         return true
+    end
+
+    function WindowElements:AutoLoadConfig()
+        local name = "default"
+        if isfile and isfile(autoloadPath()) then
+            pcall(function()
+                local n = readfile(autoloadPath())
+                if n and n ~= "" then
+                    local cleaned = sanitizeProfileName(n)
+                    if cleaned then name = cleaned end
+                end
+            end)
+        end
+        loadConfig(name)
     end
 
     function WindowElements:Dialog(options)
@@ -2469,7 +2482,10 @@ function WadeHub:CreateWindow(config)
 
     if cfg.AutoLoad then
         task.spawn(function()
-            task.wait(cfg.AutoLoadDelay)
+            game:GetService("RunService").Heartbeat:Wait()
+            if cfg.AutoLoadDelay and cfg.AutoLoadDelay > 0 then
+                task.wait(cfg.AutoLoadDelay)
+            end
             local name = "default"
             if isfile and isfile(autoloadPath()) then
                 pcall(function()
