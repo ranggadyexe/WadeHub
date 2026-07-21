@@ -656,18 +656,26 @@ function WadeHub:CreateWindow(config)
         data["cfg_select"] = n
         initFolder()
         local json = HttpService:JSONEncode(data)
+        local actualPath = cfgPath(n)
         local tmpPath = cfgPath(n .. "_tmp")
         local ok, err = pcall(function() writefile(tmpPath, json) end)
         if not ok then
             pcall(function() if delfile then delfile(tmpPath) end end)
             return false
         end
-        ok, err = pcall(function() writefile(cfgPath(n), json) end)
-        if not ok then
+        if movefile then
+            ok, err = pcall(function() movefile(tmpPath, actualPath) end)
+            if not ok then
+                pcall(function() if delfile then delfile(tmpPath) end end)
+                return false
+            end
+        else
+            ok, err = pcall(function() writefile(actualPath, json) end)
+            if not ok then
+                return false
+            end
             pcall(function() if delfile then delfile(tmpPath) end end)
-            return false
         end
-        pcall(function() if delfile then delfile(tmpPath) end end)
         pcall(function() writefile(autoloadPath(), n) end)
         return true
     end
@@ -677,15 +685,36 @@ function WadeHub:CreateWindow(config)
         local n = sanitizeProfileName(name or currentConfigName)
         if not n then return false end
         local path = cfgPath(n)
-        if not isfile(path) then return false end
-        local ok, raw = pcall(function() return readfile(path) end)
-        if not ok then
-            warn("WadeHub: Failed to read config file: " .. path)
-            return false
+        local tmpPath = cfgPath(n .. "_tmp")
+        local selectedPath = nil
+        local parsed = nil
+        if isfile(path) then
+            local ok, raw = pcall(function() return readfile(path) end)
+            local ok2
+            if ok then
+                ok2, parsed = pcall(function() return HttpService:JSONDecode(raw) end)
+            end
+            if ok and ok2 then
+                selectedPath = path
+            else
+                warn("WadeHub: Failed to load config: " .. path)
+            end
         end
-        local ok2, parsed = pcall(function() return HttpService:JSONDecode(raw) end)
-        if not ok2 then
-            warn("WadeHub: Failed to parse config file: " .. path)
+        if not selectedPath and isfile(tmpPath) then
+            local ok, raw = pcall(function() return readfile(tmpPath) end)
+            local ok2 = false
+            if ok then
+                ok2, parsed = pcall(function() return HttpService:JSONDecode(raw) end)
+            end
+            if ok and ok2 then
+                selectedPath = tmpPath
+                warn("WadeHub: Recovered config from tmp backup for '" .. n .. "'")
+            end
+        end
+        if not selectedPath then
+            if isfile(path) or isfile(tmpPath) then
+                warn("WadeHub: Both config and tmp backup are corrupt for '" .. n .. "'")
+            end
             return false
         end
         _isLoading = true
@@ -1675,7 +1704,10 @@ function WadeHub:CreateWindow(config)
 
             ValueInput.FocusLost:Connect(function()
                 local typed = tonumber(ValueInput.Text)
-                if typed then SetValue(typed) end
+                if typed then
+                    SetValue(typed)
+                    RequestSave()
+                end
                 ValueInput.Text = ""
                 ValueInput.Visible = false
                 ValueText.Visible = true
