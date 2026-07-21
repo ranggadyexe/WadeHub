@@ -201,15 +201,23 @@ local profiles = Window:GetConfigList()  -- {"default", "Profile1", "Profile2"}
 ```
 
 ### Auto-Load
-`AutoLoad = true` reads `_autoload.txt` on startup. You don't need to write it manually — `SaveConfig` auto-updates it. On next script execution, the last-saved config loads automatically (with `AutoLoadDelay` seconds delay).
+`AutoLoad = true` reads `_autoload.txt` on startup. Two ways to control it:
+
+1. **SaveConfig(name)** — automatically updates `_autoload.txt` to that name. The last-saved config becomes the startup target.
+2. **SetAutoLoad(name)** — sets the auto-load target WITHOUT saving current settings. Use this to pick which config loads next time without overwriting anything.
+
+```lua
+Window:SetAutoLoad("Warrior")   -- next restart loads Warrior.json
+```
 
 ### How It Works
 1. **Flag** registers the element in `configRegistry` with Type + Default metadata
-2. **SaveConfig** collects all `GetValue()` from registered flags → JSONEncode → atomic writefile (tmp → actual)
-3. **LoadConfig** reads file → JSONDecode → validates types → calls `SetValue()` on each flag (without firing callbacks) → restores UI state
+2. **SaveConfig** collects all `GetValue()` from registered flags → JSONEncode → atomic writefile (movefile or tmp→actual)
+3. **LoadConfig** reads file → JSONDecode → validates types → tries tmp fallback if corrupt → calls `SetValue()` on each flag (without firing callbacks) → restores UI state
 4. **RequestSave** debounces 0.3s — prevents spam on fast interactions (e.g. slider drag)
-5. **sanitizeProfileName** strips illegal characters, rejects empty names
-6. **_autoload.txt** stores the name of the last-used config for auto-load on startup
+5. **SetAutoLoad** writes only `_autoload.txt` — decouples save from auto-load target
+6. **sanitizeProfileName** strips illegal characters, rejects empty names
+7. **_autoload.txt** stores the name of the last-used config for auto-load on startup
 
 ## Dialog
 ```lua

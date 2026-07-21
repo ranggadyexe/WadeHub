@@ -825,6 +825,18 @@ function WadeHub:CreateWindow(config)
         return currentConfigName
     end
 
+    function WindowElements:SetAutoLoad(name)
+        local n = sanitizeProfileName(name)
+        if not n then
+            self:Notify({Title = "Config Error", Content = "Invalid name for auto-load: " .. tostring(name), Duration = 3})
+            return false
+        end
+        initFolder()
+        pcall(function() writefile(autoloadPath(), n) end)
+        self:Notify({Title = "Auto Load", Content = "Set to: " .. n, Duration = 2})
+        return true
+    end
+
     function WindowElements:Dialog(options)
         createDialog(options)
     end
