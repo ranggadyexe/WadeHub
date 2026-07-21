@@ -632,17 +632,6 @@ function WadeHub:CreateWindow(config)
 
     local _saveTimer = nil
 
-    local function RequestSave()
-        if _isLoading or not cfg.AutoSave then return end
-        if _saveTimer then
-            pcall(function() task.cancel(_saveTimer) end)
-        end
-        _saveTimer = task.delay(0.3, function()
-            _saveTimer = nil
-            saveConfig()
-        end)
-    end
-
     local function saveConfig(name)
         if not cfg.Enabled or not writefile then return false end
         local n = sanitizeProfileName(name or currentConfigName)
@@ -678,6 +667,17 @@ function WadeHub:CreateWindow(config)
         end
         pcall(function() writefile(autoloadPath(), n) end)
         return true
+    end
+
+    local function RequestSave()
+        if _isLoading or not cfg.AutoSave then return end
+        if _saveTimer then
+            pcall(function() task.cancel(_saveTimer) end)
+        end
+        _saveTimer = task.delay(0.3, function()
+            _saveTimer = nil
+            saveConfig()
+        end)
     end
 
     local function loadConfig(name)
