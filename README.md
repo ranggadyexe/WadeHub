@@ -143,24 +143,71 @@ right:CreateToggle({Name = "Option B"})
 ```
 
 ## Configuration
+
+### Setup
 ```lua
 local Window = WadeHub:CreateWindow({
     Name = "My Hub",
     Configuration = {
-        AutoLoad = true,
-        FolderName = "MyGame",
+        AutoLoad = true,        -- auto-load last-used config on startup
+        FolderName = "MyGame",  -- folder name for config files
     },
 })
-
--- Add Flag to elements you want to persist
-Tab:CreateToggle({Name = "Aimbot", Flag = "aimbot"})
-
--- Multi-profile
-Window:SaveConfig("Profile1")
-Window:LoadConfig("Profile2")
-Window:DeleteConfig("Old")
-Window:GetConfigList()            -- {"default", "Profile1", "Profile2"}
 ```
+
+### Flag System
+Only elements with `Flag` are saved to config files. Add `Flag = "unique_name"` to any element you want to persist:
+
+```lua
+Tab:CreateToggle({  Name = "Aimbot",   Flag = "aimbot",   CurrentValue = false })
+Tab:CreateSlider({  Name = "Speed",    Flag = "speed",    Min = 16, Max = 100, Default = 50 })
+Tab:CreateDropdown({Name = "Weapon",   Flag = "weapon",   Options = {"Sword", "Bow"}, Default = "Sword"})
+Tab:CreateMultiDropdown({Name = "Skills", Flag = "skills", Options = {"A","B","C"}, CurrentSelected = {"A"}})
+Tab:CreateTextBox({ Name = "Username", Flag = "username", Placeholder = "..." })
+Tab:CreateKeybind({ Name = "UI Key",   Flag = "ui_key",   CurrentKey = Enum.KeyCode.RightShift })
+```
+
+| Element | Flag | Value Type | Example |
+|---|---|---|---|
+| `CreateToggle` | ✅ | Boolean | `"aimbot"` → `true/false` |
+| `CreateSlider` | ✅ | Number | `"speed"` → `50` |
+| `CreateDropdown` | ✅ | String | `"weapon"` → `"Sword"` |
+| `CreateMultiDropdown` | ✅ | Array | `"skills"` → `{"A","B"}` |
+| `CreateTextBox` | ✅ | String | `"username"` → `"Player123"` |
+| `CreateKeybind` | ✅ | String (KeyCode name) | `"ui_key"` → `"RightShift"` |
+| `CreateColorPicker` | ❌ | — | Not supported |
+| `CreateButton` | ❌ | — | No value to save |
+| `CreateLabel` | ❌ | — | No value to save |
+
+### Multi-Profile
+```lua
+-- Save current flags to a profile
+Window:SaveConfig("Profile1")   -- MyGame/Profile1.json
+
+-- Load flags from a profile
+Window:LoadConfig("Profile2")   -- MyGame/Profile2.json
+
+-- Delete a profile
+Window:DeleteConfig("Old")
+
+-- Get list of all saved profiles
+local profiles = Window:GetConfigList()  -- {"default", "Profile1", "Profile2"}
+```
+
+### Auto-Load
+Set which config loads on startup:
+```lua
+-- Write to _autoload.txt manually (or use the "Set Auto Load" button in your UI)
+writefile("MyGame/_autoload.txt", "Profile1")
+```
+
+On next script execution, `Profile1` loads automatically (0.5s delay after UI init).
+
+### How It Works
+1. **Flag** registers the element in `configRegistry`
+2. **SaveConfig** collects all `GetValue()` from registered flags → JSONEncode → writefile
+3. **LoadConfig** reads file → JSONDecode → calls `SetValue()` on each flag → restores UI state
+4. **_autoload.txt** stores the name of the last-used config for auto-load on startup
 
 ## Dialog
 ```lua
