@@ -1680,8 +1680,10 @@ function WadeHub:CreateWindow(config)
                 local p = (currentValue - min) / (max - min)
                 ValueText.Text = tostring(currentValue)
                 TweenService:Create(SliderFill, TweenInfo.new(0.2), {Size = UDim2.new(p, 0, 1, 0)}):Play()
-                updateKnobPosition(p)
-                if not _isLoading then
+                if _isLoading then
+                    task.defer(function() updateKnobPosition(p) end)
+                else
+                    updateKnobPosition(p)
                     callback(currentValue)
                 end
             end
@@ -2198,6 +2200,7 @@ function WadeHub:CreateWindow(config)
                     SetValue = function(val)
                         currentSelected = val or {}
                         UpdateSelectedText()
+                        BuildOptions()
                     end,
                     Refresh = RefreshOptions
                 })
