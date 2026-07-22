@@ -154,7 +154,9 @@ local Window = WadeHub:CreateWindow({
         AutoLoadDelay = 0.5,      -- optional, seconds before auto-load (default 0.5)
         FolderName = "MyGame",    -- folder name for config files (default "WadeHub")
         OnConfigLoaded = function(name)  -- optional, called after config restore
-            print("Config loaded: " .. name)
+            -- Read restored flag values
+            Flags.AutoStart = Window:GetFlagValue("auto_start")
+            Flags.Speed = Window:GetFlagValue("speed")
         end,
     },
 })
@@ -172,7 +174,7 @@ Tab:CreateTextBox({        Name = "Username", Flag = "username", Placeholder = "
 Tab:CreateKeybind({        Name = "UI Key",   Flag = "ui_key",   CurrentKey = Enum.KeyCode.RightShift })
 ```
 
-> **Important**: Callbacks do NOT fire when config is loaded — only UI state changes. Your game logic won't trigger automatically on restart.
+> **Important**: Callbacks do NOT fire when config is loaded — only UI state changes. To read restored values, use `Window:GetFlagValue("flagName")` inside the `OnConfigLoaded` callback.
 
 | Element | Flag Support | Saved As | Example |
 |---|---|---|---|
@@ -210,6 +212,11 @@ local name = Window:GetCurrentConfig()  -- "Profile1"
 
 -- Get list of all saved profiles (excludes _tmp and _autoload)
 local profiles = Window:GetConfigList() -- {"default", "Profile1", "Profile2"}
+
+-- Get flag value (e.g. inside OnConfigLoaded callback)
+local aimbot = Window:GetFlagValue("aimbot")      -- true/false
+local speed = Window:GetFlagValue("speed")         -- 50
+local weapon = Window:GetFlagValue("weapon")       -- "Sword"
 ```
 
 ### How AutoLoad + AutoSave Work (Default Behavior)
@@ -238,7 +245,7 @@ SET AUTO-LOAD WITHOUT SAVING:
 ```
 
 ### Safety Features
-- **No side effects on load**: All `SetValue()` calls skip user callbacks via `_isLoading` guard
+- **No side effects on load**: All `SetValue()` calls skip user callbacks via `_isLoading` guard. Query restored values with `Window:GetFlagValue()`
 - **Type validation**: Wrong types in JSON → fall back to element default + `warn()`
 - **Missing flag fallback**: New flags not in file → restored to their default values
 - **Atomic writes**: Uses `movefile` if available, or writes to `_tmp` first then copies

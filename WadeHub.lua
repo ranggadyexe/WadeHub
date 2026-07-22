@@ -594,6 +594,7 @@ function WadeHub:CreateWindow(config)
     NotifLayout.Padding = UDim.new(0, 6)
 
     local WindowElements = {}
+    WindowElements.Tabs = {}
     local currentActiveTab = nil
     local configRegistry = {}
     local _isLoading = false
@@ -755,6 +756,11 @@ function WadeHub:CreateWindow(config)
         if configRegistry["cfg_select"] then
             configRegistry["cfg_select"].SetValue(n)
         end
+        for flag, item in pairs(configRegistry) do
+            if flag ~= "cfg_select" and item.Tab and item.GetValue then
+                item.Tab._flagValues[flag] = item.GetValue()
+            end
+        end
         _isLoading = false
         currentConfigName = n
         if type(cfg.OnConfigLoaded) == "function" then
@@ -858,6 +864,14 @@ function WadeHub:CreateWindow(config)
 
     function WindowElements:Dialog(options)
         createDialog(options)
+    end
+
+    function WindowElements:GetFlagValue(flagName)
+        for _, tab in ipairs(self.Tabs) do
+            local val = tab:GetFlagValue(flagName)
+            if val ~= nil then return val end
+        end
+        return nil
     end
 
     function WindowElements:Notify(config)
@@ -1046,6 +1060,7 @@ function WadeHub:CreateWindow(config)
         end
 
         local TabElements = {}
+        TabElements._flagValues = {}
 
                 function TabElements:CreateSection(config)
             local sectionName = type(config) == "table" and config.Name or config
@@ -1220,6 +1235,7 @@ function WadeHub:CreateWindow(config)
         end
 
         function TabElements:CreateTextBox(config)
+            local tab = self
             local tbName = config.Name or "TextBox"
             local placeholder = config.Placeholder or "Type here..."
             local clearOnFocus = config.ClearOnFocus or false
@@ -1287,14 +1303,19 @@ function WadeHub:CreateWindow(config)
             InputBox.FocusLost:Connect(function()
                 TweenService:Create(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(70, 70, 75)}):Play()
                 currentText = InputBox.Text
+                if config.Flag then
+                    tab._flagValues[config.Flag] = currentText
+                end
                 callback(currentText)
                 RequestSave()
             end)
 
             if config.Flag then
+                self._flagValues[config.Flag] = ""
                 RegisterFlag(config.Flag, {
                     Type = "string",
                     Default = "",
+                    Tab = self,
                     GetValue = function() return currentText end,
                     SetValue = function(val)
                         currentText = tostring(val or "")
@@ -1305,6 +1326,7 @@ function WadeHub:CreateWindow(config)
         end
 
         function TabElements:CreateKeybind(config)
+            local tab = self
             local kbName = config.Name or "Keybind"
             local currentKey = config.CurrentKey or Enum.KeyCode.E
             local callback = config.Callback or function() end
@@ -1367,6 +1389,9 @@ function WadeHub:CreateWindow(config)
                     if input.UserInputType == Enum.UserInputType.Keyboard then
                         currentKey = input.KeyCode
                         BindButton.Text = currentKey.Name
+                        if config.Flag then
+                            tab._flagValues[config.Flag] = currentKey.Name
+                        end
                         isBinding = false
                         TweenService:Create(UIStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(70, 70, 75)}):Play()
                         RequestSave()
@@ -1376,6 +1401,9 @@ function WadeHub:CreateWindow(config)
                         TweenService:Create(BindButton, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(55, 55, 58)}):Play()
                         task.wait(0.1)
                         TweenService:Create(BindButton, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(28, 28, 30)}):Play()
+                        if config.Flag then
+                            tab._flagValues[config.Flag] = currentKey.Name
+                        end
                         callback(currentKey.Name)
                     end
                 end
@@ -1383,9 +1411,11 @@ function WadeHub:CreateWindow(config)
             table.insert(allConnections, inputConn)
 
             if config.Flag then
+                self._flagValues[config.Flag] = currentKey.Name
                 RegisterFlag(config.Flag, {
                     Type = "string",
                     Default = currentKey.Name,
+                    Tab = self,
                     GetValue = function() return currentKey.Name end,
                     SetValue = function(val)
                         local kc = Enum.KeyCode[val]
@@ -1399,6 +1429,7 @@ function WadeHub:CreateWindow(config)
         end
 
                 function TabElements:CreateToggle(config)
+            local tab = self
             local toggleName = config.Name or "Toggle"
             local default = config.CurrentValue or false
             local callback = config.Callback or function() end
@@ -1481,6 +1512,9 @@ function WadeHub:CreateWindow(config)
                     TweenService:Create(Title, TweenInfo.new(0.3), {TextColor3 = Color3.fromRGB(150, 150, 155)}):Play()
                 end
                 if not _isLoading then
+                    if config.Flag then
+                        tab._flagValues[config.Flag] = state
+                    end
                     callback(state)
                 end
             end
@@ -1493,15 +1527,18 @@ function WadeHub:CreateWindow(config)
             end)
 
             if config.Flag then
+                self._flagValues[config.Flag] = default
                 RegisterFlag(config.Flag, {
                     Type = "boolean",
                     Default = default,
+                    Tab = self,
                     GetValue = function() return state end,
                     SetValue = function(val) SetState(val) end
                 })
             end
         end
         function TabElements:CreateSlider(config)
+            local tab = self
             local sliderName = config.Name or "Slider"
             local min = config.Min or 0
             local max = config.Max or 100
@@ -1684,6 +1721,9 @@ function WadeHub:CreateWindow(config)
                     task.defer(function() updateKnobPosition(p) end)
                 else
                     updateKnobPosition(p)
+                    if config.Flag then
+                        tab._flagValues[config.Flag] = currentValue
+                    end
                     callback(currentValue)
                 end
             end
@@ -1696,6 +1736,9 @@ function WadeHub:CreateWindow(config)
                 local p = (value - min) / (max - min)
                 TweenService:Create(SliderFill, TweenInfo.new(0.1), {Size = UDim2.new(p, 0, 1, 0)}):Play()
                 updateKnobPosition(p)
+                if config.Flag then
+                    tab._flagValues[config.Flag] = value
+                end
                 callback(value)
                 RequestSave()
             end
@@ -1746,15 +1789,18 @@ function WadeHub:CreateWindow(config)
             end)
 
             if config.Flag then
+                self._flagValues[config.Flag] = snap(default)
                 RegisterFlag(config.Flag, {
                     Type = "number",
                     Default = snap(default),
+                    Tab = self,
                     GetValue = function() return currentValue end,
                     SetValue = function(val) SetValue(val) end
                 })
             end
         end
         function TabElements:CreateDropdown(config)
+            local tab = self
             local dropName = config.Name or "Dropdown"
             local options = config.Options or {}
             local default = config.Default
@@ -1890,6 +1936,9 @@ function WadeHub:CreateWindow(config)
                         currentSelected = opt
                         SelectedText.Text = opt
                         SelectedText.TextColor3 = Color3.fromRGB(10, 132, 255)
+                        if config.Flag then
+                            tab._flagValues[config.Flag] = opt
+                        end
                         callback(opt)
                         RequestSave()
                         isOpen = false
@@ -1954,9 +2003,11 @@ function WadeHub:CreateWindow(config)
             end
 
             if config.Flag then
+                self._flagValues[config.Flag] = default
                 RegisterFlag(config.Flag, {
                     Type = "string",
                     Default = default,
+                    Tab = self,
                     GetValue = function() return currentSelected end,
                     SetValue = function(val)
                         currentSelected = val
@@ -1971,6 +2022,7 @@ function WadeHub:CreateWindow(config)
         end
 
         function TabElements:CreateMultiDropdown(config)
+            local tab = self
             local dropName = config.Name or "Multi Dropdown"
             local options = config.Options or {}
             local currentSelected = config.CurrentSelected or {}
@@ -2133,6 +2185,13 @@ function WadeHub:CreateWindow(config)
                             Checkmark = CreateIcon(OptBtn, "check", UDim2.new(0, 16, 0, 16), UDim2.new(1, -22, 0.5, -8))
                         end
                         UpdateSelectedText()
+                        if config.Flag then
+                            local copy = {}
+                            for _, v in ipairs(currentSelected) do
+                                table.insert(copy, v)
+                            end
+                            tab._flagValues[config.Flag] = copy
+                        end
                         callback(currentSelected)
                         RequestSave()
                     end)
@@ -2193,9 +2252,15 @@ function WadeHub:CreateWindow(config)
             end
 
             if config.Flag then
+                local initialSelected = {}
+                for _, v in ipairs(currentSelected) do
+                    table.insert(initialSelected, v)
+                end
+                self._flagValues[config.Flag] = initialSelected
                 RegisterFlag(config.Flag, {
                     Type = "table",
                     Default = config.CurrentSelected or {},
+                    Tab = self,
                     GetValue = function() return currentSelected end,
                     SetValue = function(val)
                         currentSelected = val or {}
@@ -2469,6 +2534,12 @@ function WadeHub:CreateWindow(config)
 
             return unpack(cols)
         end
+
+        function TabElements:GetFlagValue(flagName)
+            return self._flagValues[flagName]
+        end
+
+        table.insert(WindowElements.Tabs, TabElements)
 
         return TabElements
     end
